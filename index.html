@@ -1,7 +1,7 @@
 <script type="module">
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-const supabase = createClient("TON_URL","TA_KEY")
+const supabase = createClient("https://ixbefzpxsmsvlqicwbda.supabase.co","sb_publishable_S0lBKp8KJQIzcdXJCdXz5A_bvv-Q9V2")
 
 const { data, error } = await supabase.from("rooms").select("*")
 
