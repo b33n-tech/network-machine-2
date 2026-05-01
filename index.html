@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Push Room Clean</title>
+<title>Push Room</title>
 
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -16,37 +16,32 @@ display:flex;
 justify-content:center;
 align-items:center;
 }
-.wrap{
-width:100%;
-max-width:420px;
-padding:30px;
-text-align:center;
-}
+.wrap{width:100%;max-width:460px;padding:30px;text-align:center}
 .card{
 background:#1e293b;
 padding:25px;
 border-radius:22px;
 box-shadow:0 10px 30px rgba(0,0,0,.35);
 }
-h1{
-font-size:36px;
-margin-bottom:20px;
-}
+h1{font-size:36px;margin-bottom:16px}
+
 input{
 width:100%;
-padding:15px;
-font-size:20px;
+padding:14px;
+font-size:18px;
 border:none;
 border-radius:12px;
 text-align:center;
-margin-bottom:14px;
+margin-bottom:12px;
 text-transform:uppercase;
 }
+
 button{
 border:none;
 cursor:pointer;
 transition:.2s;
 }
+
 #connectBtn{
 width:100%;
 padding:14px;
@@ -55,10 +50,11 @@ border-radius:12px;
 background:#22c55e;
 color:white;
 }
+
 #pushBtn{
-margin-top:20px;
-width:220px;
-height:220px;
+margin-top:18px;
+width:210px;
+height:210px;
 border-radius:50%;
 background:#3b82f6;
 color:white;
@@ -66,17 +62,35 @@ font-size:42px;
 font-weight:bold;
 display:none;
 }
-#pushBtn:hover{transform:scale(1.03)}
-#pushBtn:active{transform:scale(.96)}
+
+#pushBtn:active{transform:scale(.95)}
+
 .status{
-margin-top:16px;
+margin-top:14px;
 opacity:.85;
 }
+
 #notif{
-margin-top:18px;
-font-size:24px;
+margin-top:14px;
+font-size:22px;
 color:#facc15;
-min-height:32px;
+min-height:30px;
+}
+
+.panel{
+margin-top:18px;
+text-align:left;
+background:#0f172a;
+padding:14px;
+border-radius:14px;
+}
+
+.user{
+padding:6px 0;
+}
+
+.online{
+color:#22c55e;
 }
 </style>
 </head>
@@ -88,12 +102,19 @@ min-height:32px;
 <h1>⚡ Push Room</h1>
 
 <input id="roomInput" placeholder="CODE ROOM" maxlength="12">
+<input id="nameInput" placeholder="TON NOM" maxlength="20">
+
 <button id="connectBtn">Connexion</button>
 
 <button id="pushBtn">PUSH</button>
 
 <div class="status" id="status">Non connecté</div>
 <div id="notif"></div>
+
+<div class="panel">
+<b>🖥 Postes connectés</b>
+<div id="usersList">Aucun</div>
+</div>
 
 </div>
 </div>
@@ -108,78 +129,126 @@ const SUPABASE_KEY = "sb_publishable_S0lBKp8KJQIzcdXJCdXz5A_bvv-Q9V2"
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
 const roomInput = document.getElementById("roomInput")
+const nameInput = document.getElementById("nameInput")
 const connectBtn = document.getElementById("connectBtn")
 const pushBtn = document.getElementById("pushBtn")
 const statusTxt = document.getElementById("status")
 const notif = document.getElementById("notif")
+const usersList = document.getElementById("usersList")
 
 let room = null
 let myId = Math.random().toString(36).slice(2,8)
 let channel = null
 
+function renderUsers(users=[]){
+if(!users.length){
+usersList.innerHTML = "Aucun"
+return
+}
+usersList.innerHTML = users.map(u =>
+`<div class="user">• ${u.name}</div>`
+).join("")
+}
+
+async function getRoom(){
+const { data } = await supabase
+.from("rooms")
+.select("*")
+.eq("code", room)
+.single()
+return data
+}
+
 connectBtn.onclick = async () => {
 
-  room = roomInput.value.trim().toUpperCase()
-  if(!room) return
+room = roomInput.value.trim().toUpperCase()
+if(!room) return
 
-  // crée room si absente
-  await supabase
-    .from("rooms")
-    .upsert({
-      code: room,
-      last_push_at: new Date().toISOString(),
-      sender: "system"
-    }, { onConflict:"code" })
+const username = nameInput.value.trim() || "Anonyme"
 
-  statusTxt.innerText = "🟢 Connecté à " + room
-  pushBtn.style.display = "inline-block"
+let data = await getRoom()
 
-  // coupe ancien channel
-  if(channel){
-    await supabase.removeChannel(channel)
-  }
+let users = data?.machines || []
 
-  // écoute updates SQL
-  channel = supabase
-    .channel("watch-room-"+room)
-    .on("postgres_changes", {
-      event:"UPDATE",
-      schema:"public",
-      table:"rooms",
-      filter:`code=eq.${room}`
-    }, payload => {
+users = users.filter(u => u.id !== myId)
 
-      const data = payload.new
+users.push({
+id: myId,
+name: username
+})
 
-      if(data.sender !== myId && data.sender !== "system"){
-        notif.innerText = "⚡ Push reçu !"
+await supabase.from("rooms").upsert({
+code: room,
+machines: users,
+sender:"system",
+last_push_at:new Date().toISOString()
+},{ onConflict:"code" })
 
-        setTimeout(()=>{
-          notif.innerText = ""
-        },1000)
-      }
+statusTxt.innerText = "🟢 Connecté à " + room
+pushBtn.style.display = "inline-block"
 
-    })
-    .subscribe((status)=>{
-      console.log("Realtime:", status)
-    })
+renderUsers(users)
+
+if(channel){
+await supabase.removeChannel(channel)
+}
+
+channel = supabase
+.channel("room-"+room)
+.on("postgres_changes",{
+event:"UPDATE",
+schema:"public",
+table:"rooms",
+filter:`code=eq.${room}`
+}, payload => {
+
+const data = payload.new
+
+renderUsers(data.machines || [])
+
+if(data.sender !== myId && data.sender !== "system"){
+notif.innerText = "⚡ Push reçu !"
+
+setTimeout(()=>notif.innerText="",1000)
+}
+
+})
+.subscribe()
 
 }
 
 pushBtn.onclick = async () => {
 
-  if(!room) return
+if(!room) return
 
-  await supabase
-    .from("rooms")
-    .update({
-      last_push_at:new Date().toISOString(),
-      sender:myId
-    })
-    .eq("code", room)
+await supabase
+.from("rooms")
+.update({
+last_push_at:new Date().toISOString(),
+sender:myId
+})
+.eq("code", room)
 
 }
 
+window.addEventListener("beforeunload", async () => {
+
+if(!room) return
+
+const row = await getRoom()
+if(!row) return
+
+let users = row.machines || []
+users = users.filter(u => u.id !== myId)
+
+await supabase
+.from("rooms")
+.update({ machines: users })
+.eq("code", room)
+
+})
+
 </script>
+
 </body>
 </html>
